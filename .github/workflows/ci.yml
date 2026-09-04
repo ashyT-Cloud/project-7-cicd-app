@@ -113,64 +113,74 @@ jobs:
           import os
           import re
 
-          path = Path(
+          image_path = Path(
               "gitops/apps/demo-app/overlays/dev/kustomization.yaml"
           )
 
-          lines = path.read_text().splitlines()
+          version_path = Path(
+              "gitops/apps/demo-app/base/deployment.yaml"
+          )
 
-          image_count = 0
-          version_count = 0
+          # Update immutable image tag in the Dev overlay
+          image_content = image_path.read_text()
 
-          for i, line in enumerate(lines):
-              if re.match(r'^\s*newTag:\s*', line):
-                  indent = line[:len(line) - len(line.lstrip())]
-                  lines[i] = f'{indent}newTag: {os.environ["IMAGE_TAG"]}'
-                  image_count += 1
-
-              if line.strip() == "- name: APP_VERSION":
-                  if i + 1 >= len(lines):
-                      raise SystemExit(
-                          "ERROR: APP_VERSION has no value line"
-                      )
-
-                  value_line = lines[i + 1]
-                  indent = value_line[:len(value_line) - len(value_line.lstrip())]
-
-                  lines[i + 1] = (
-                      f'{indent}value: "{os.environ["APP_VERSION"]}"'
-                  )
-                  version_count += 1
+          image_content, image_count = re.subn(
+              r'(^\s*newTag:\s*).*$',
+              rf'\g<1>{os.environ["IMAGE_TAG"]}',
+              image_content,
+              count=1,
+              flags=re.MULTILINE,
+          )
 
           if image_count != 1:
               raise SystemExit(
                   f"ERROR: Expected exactly one newTag entry, found {image_count}"
               )
 
+          image_path.write_text(image_content)
+
+          # Update application version in the base Deployment
+          version_content = version_path.read_text()
+
+          version_content, version_count = re.subn(
+              r'(^\s*-\s*name:\s*APP_VERSION\s*\n'
+              r'\s*value:\s*).*$',
+              rf'\g<1>"{os.environ["APP_VERSION"]}"',
+              version_content,
+              count=1,
+              flags=re.MULTILINE,
+          )
+
           if version_count != 1:
               raise SystemExit(
                   f"ERROR: Expected exactly one APP_VERSION entry, found {version_count}"
               )
 
-          path.write_text("\n".join(lines) + "\n")
+          version_path.write_text(version_content)
           PY
 
       - name: Verify GitOps change
         run: |
-          echo "Updated Dev manifest:"
-          grep -n -A1 "APP_VERSION" gitops/apps/demo-app/overlays/dev/kustomization.yaml
-          grep -n "newTag" gitops/apps/demo-app/overlays/dev/kustomization.yaml
+          echo "=== Dev image tag ==="
+          grep -n "newTag" \
+            gitops/apps/demo-app/overlays/dev/kustomization.yaml
+
+          echo "=== Application version ==="
+          grep -n -A1 "APP_VERSION" \
+            gitops/apps/demo-app/base/deployment.yaml
 
       - name: Commit and push GitOps change
         working-directory: gitops
         env:
           IMAGE_TAG: ${{ github.sha }}
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          GITOPS_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           git config user.name "project-7-gitops-updater[bot]"
           git config user.email "project-7-gitops-updater[bot]@users.noreply.github.com"
 
-          git add apps/demo-app/overlays/dev/kustomization.yaml
+          git add \
+            apps/demo-app/overlays/dev/kustomization.yaml \
+            apps/demo-app/base/deployment.yaml
 
           git diff --cached --quiet && {
             echo "No GitOps changes detected."
@@ -181,5 +191,5 @@ jobs:
             -m "chore: deploy demo-app ${IMAGE_TAG}"
 
           git push \
-            "https://x-access-token:${GITHUB_TOKEN}@github.com/ashyT-Cloud/project-7-gitops.git" \
+            "https://x-access-token:${GITOPS_TOKEN}@github.com/ashyT-Cloud/project-7-gitops.git" \
             HEAD:main
