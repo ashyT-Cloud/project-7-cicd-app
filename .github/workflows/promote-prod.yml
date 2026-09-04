@@ -20,6 +20,7 @@ jobs:
   promote:
     name: Promote Image to Prod
     runs-on: ubuntu-latest
+    environment: production
 
     steps:
       - name: Checkout application repository
