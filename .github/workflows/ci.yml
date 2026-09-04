@@ -138,6 +138,7 @@ jobs:
         working-directory: gitops
         env:
           IMAGE_TAG: ${{ github.sha }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           git config user.name "project-7-gitops-updater[bot]"
           git config user.email "project-7-gitops-updater[bot]@users.noreply.github.com"
@@ -152,4 +153,6 @@ jobs:
           git commit \
             -m "chore: deploy demo-app ${IMAGE_TAG}"
 
-          git push origin main
+          git push \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/ashyT-Cloud/project-7-gitops.git" \
+            HEAD:main
