@@ -1,0 +1,138 @@
+name: Promote to Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Immutable image SHA to promote to production"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: project-7-cicd-app
+  GITOPS_REPOSITORY: ashyT-Cloud/project-7-gitops
+
+jobs:
+  promote:
+    name: Promote Image to Prod
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout application repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: arn:aws:iam::487054650859:role/Project7-GitHubActions-ECR-Role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify image exists in ECR
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          echo "Checking ECR image:"
+          echo "${ECR_REPOSITORY}:${IMAGE_TAG}"
+
+          aws ecr describe-images \
+            --repository-name "${ECR_REPOSITORY}" \
+            --image-ids imageTag="${IMAGE_TAG}" \
+            --region "${AWS_REGION}" \
+            --query 'imageDetails[0].{Tag:imageTags[0],Digest:imageDigest,PushedAt:imagePushedAt}' \
+            --output table
+
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ashyT-Cloud
+          repositories: |
+            project-7-gitops
+
+      - name: Checkout GitOps repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.GITOPS_REPOSITORY }}
+          token: ${{ steps.app-token.outputs.token }}
+          path: gitops
+          ref: main
+          persist-credentials: false
+
+      - name: Update production image
+        working-directory: gitops
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          import re
+
+          path = Path(
+              "apps/demo-app/overlays/prod/kustomization.yaml"
+          )
+
+          content = path.read_text()
+
+          content, count = re.subn(
+              r'(^\s*newTag:\s*).*$',
+              rf'\g<1>{os.environ["IMAGE_TAG"]}',
+              content,
+              count=1,
+              flags=re.MULTILINE,
+          )
+
+          if count != 1:
+              raise SystemExit(
+                  f"ERROR: Expected exactly one newTag entry, found {count}"
+              )
+
+          path.write_text(content)
+          PY
+
+      - name: Verify production manifest
+        working-directory: gitops
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          echo "=== Production image ==="
+
+          grep -n "newTag" \
+            apps/demo-app/overlays/prod/kustomization.yaml
+
+          echo
+          echo "=== Rendered image ==="
+
+          kubectl kustomize apps/demo-app/overlays/prod \
+            | grep "image:"
+
+      - name: Commit and push production promotion
+        working-directory: gitops
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          GITOPS_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          git config user.name "project-7-gitops-updater[bot]"
+          git config user.email "project-7-gitops-updater[bot]@users.noreply.github.com"
+
+          git add \
+            apps/demo-app/overlays/prod/kustomization.yaml
+
+          git diff --cached --quiet && {
+            echo "No production changes detected."
+            exit 0
+          }
+
+          git commit \
+            -m "promote: demo-app ${IMAGE_TAG} to prod"
+
+          git push \
+            "https://x-access-token:${GITOPS_TOKEN}@github.com/${GITOPS_REPOSITORY}.git" \
+            HEAD:main
+
