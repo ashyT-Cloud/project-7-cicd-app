@@ -79,3 +79,77 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
         run: |
           docker push $REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ashyT-Cloud
+          repositories: |
+            project-7-gitops
+
+      - name: Checkout GitOps repository
+        uses: actions/checkout@v4
+        with:
+          repository: ashyT-Cloud/project-7-gitops
+          token: ${{ steps.app-token.outputs.token }}
+          path: gitops
+          ref: main
+          persist-credentials: false
+
+      - name: Update Dev image tag
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import os
+          import re
+
+          path = Path(
+              "gitops/apps/demo-app/overlays/dev/kustomization.yaml"
+          )
+
+          content = path.read_text()
+
+          updated, count = re.subn(
+              r'(^\s*newTag:\s*).*$',
+              rf'\g<1>{os.environ["IMAGE_TAG"]}',
+              content,
+              count=1,
+              flags=re.MULTILINE,
+          )
+
+          if count != 1:
+              raise SystemExit("ERROR: Could not find exactly one newTag entry")
+
+          path.write_text(updated)
+          PY
+
+      - name: Verify GitOps change
+        run: |
+          echo "Updated Dev manifest:"
+          grep -n "newTag" \
+            gitops/apps/demo-app/overlays/dev/kustomization.yaml
+
+      - name: Commit and push GitOps change
+        working-directory: gitops
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          git config user.name "project-7-gitops-updater[bot]"
+          git config user.email "project-7-gitops-updater[bot]@users.noreply.github.com"
+
+          git add apps/demo-app/overlays/dev/kustomization.yaml
+
+          git diff --cached --quiet && {
+            echo "No GitOps changes detected."
+            exit 0
+          }
+
+          git commit \
+            -m "chore: deploy demo-app ${IMAGE_TAG}"
+
+          git push origin main
