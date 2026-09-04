@@ -99,11 +99,16 @@ jobs:
           ref: main
           persist-credentials: false
 
-      - name: Update Dev image tag
+      - name: Update Dev image and application version
         env:
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          python - <<'PY'
+          APP_VERSION=$(cat VERSION)
+
+          export IMAGE_TAG
+          export APP_VERSION
+
+          python3 - <<'PY'
           from pathlib import Path
           import os
           import re
@@ -114,7 +119,7 @@ jobs:
 
           content = path.read_text()
 
-          updated, count = re.subn(
+          content, image_count = re.subn(
               r'(^\s*newTag:\s*).*$',
               rf'\g<1>{os.environ["IMAGE_TAG"]}',
               content,
@@ -122,17 +127,33 @@ jobs:
               flags=re.MULTILINE,
           )
 
-          if count != 1:
-              raise SystemExit("ERROR: Could not find exactly one newTag entry")
+          content, version_count = re.subn(
+              r'(^\s*-\s*name:\s*APP_VERSION\s*\n'
+              r'\s*value:\s*).*$',
+              rf'\g<1>"{os.environ["APP_VERSION"]}"',
+              content,
+              count=1,
+              flags=re.MULTILINE,
+          )
 
-          path.write_text(updated)
+          if image_count != 1:
+              raise SystemExit(
+                  "ERROR: Could not find exactly one newTag entry"
+              )
+
+          if version_count != 1:
+              raise SystemExit(
+                  "ERROR: Could not find exactly one APP_VERSION entry"
+              )
+
+          path.write_text(content)
           PY
 
       - name: Verify GitOps change
         run: |
           echo "Updated Dev manifest:"
-          grep -n "newTag" \
-            gitops/apps/demo-app/overlays/dev/kustomization.yaml
+          grep -n -A1 "APP_VERSION" gitops/apps/demo-app/overlays/dev/kustomization.yaml
+          grep -n "newTag" gitops/apps/demo-app/overlays/dev/kustomization.yaml
 
       - name: Commit and push GitOps change
         working-directory: gitops

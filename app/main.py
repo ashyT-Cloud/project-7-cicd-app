@@ -14,7 +14,7 @@ def home():
         {
             "application": APP_NAME,
             "version": APP_VERSION,
-            "message": "Project 7 CI/CD application is running",
+            "message": "Project 7 CI/CD application v0.2.0 is running",
         }
     )
 
