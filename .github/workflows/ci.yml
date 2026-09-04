@@ -117,36 +117,42 @@ jobs:
               "gitops/apps/demo-app/overlays/dev/kustomization.yaml"
           )
 
-          content = path.read_text()
+          lines = path.read_text().splitlines()
 
-          content, image_count = re.subn(
-              r'(^\s*newTag:\s*).*$',
-              rf'\g<1>{os.environ["IMAGE_TAG"]}',
-              content,
-              count=1,
-              flags=re.MULTILINE,
-          )
+          image_count = 0
+          version_count = 0
 
-          content, version_count = re.subn(
-              r'(^\s*-\s*name:\s*APP_VERSION\s*\n'
-              r'\s*value:\s*).*$',
-              rf'\g<1>"{os.environ["APP_VERSION"]}"',
-              content,
-              count=1,
-              flags=re.MULTILINE,
-          )
+          for i, line in enumerate(lines):
+              if re.match(r'^\s*newTag:\s*', line):
+                  indent = line[:len(line) - len(line.lstrip())]
+                  lines[i] = f'{indent}newTag: {os.environ["IMAGE_TAG"]}'
+                  image_count += 1
+
+              if line.strip() == "- name: APP_VERSION":
+                  if i + 1 >= len(lines):
+                      raise SystemExit(
+                          "ERROR: APP_VERSION has no value line"
+                      )
+
+                  value_line = lines[i + 1]
+                  indent = value_line[:len(value_line) - len(value_line.lstrip())]
+
+                  lines[i + 1] = (
+                      f'{indent}value: "{os.environ["APP_VERSION"]}"'
+                  )
+                  version_count += 1
 
           if image_count != 1:
               raise SystemExit(
-                  "ERROR: Could not find exactly one newTag entry"
+                  f"ERROR: Expected exactly one newTag entry, found {image_count}"
               )
 
           if version_count != 1:
               raise SystemExit(
-                  "ERROR: Could not find exactly one APP_VERSION entry"
+                  f"ERROR: Expected exactly one APP_VERSION entry, found {version_count}"
               )
 
-          path.write_text(content)
+          path.write_text("\n".join(lines) + "\n")
           PY
 
       - name: Verify GitOps change
