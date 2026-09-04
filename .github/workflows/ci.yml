@@ -118,7 +118,7 @@ jobs:
           )
 
           version_path = Path(
-              "gitops/apps/demo-app/base/deployment.yaml"
+              "gitops/apps/demo-app/overlays/dev/kustomization.yaml"
           )
 
           # Update immutable image tag in the Dev overlay
@@ -143,7 +143,10 @@ jobs:
           version_content = version_path.read_text()
 
           version_content, version_count = re.subn(
-              r'(^\s*-\s*name:\s*APP_VERSION\s*\n'
+              r'(^\s*-\s*op:\s*add\s*\n'
+              r'\s*path:\s*/spec/template/spec/containers/0/env/-\s*\n'
+              r'\s*value:\s*\n'
+              r'\s*name:\s*APP_VERSION\s*\n'
               r'\s*value:\s*).*$',
               rf'\g<1>"{os.environ["APP_VERSION"]}"',
               version_content,
@@ -165,9 +168,9 @@ jobs:
           grep -n "newTag" \
             gitops/apps/demo-app/overlays/dev/kustomization.yaml
 
-          echo "=== Application version ==="
-          grep -n -A1 "APP_VERSION" \
-            gitops/apps/demo-app/base/deployment.yaml
+          echo "=== Dev application version ==="
+          grep -n -A5 "APP_VERSION" \
+            gitops/apps/demo-app/overlays/dev/kustomization.yaml
 
       - name: Commit and push GitOps change
         working-directory: gitops
@@ -179,8 +182,7 @@ jobs:
           git config user.email "project-7-gitops-updater[bot]@users.noreply.github.com"
 
           git add \
-            apps/demo-app/overlays/dev/kustomization.yaml \
-            apps/demo-app/base/deployment.yaml
+            apps/demo-app/overlays/dev/kustomization.yaml
 
           git diff --cached --quiet && {
             echo "No GitOps changes detected."

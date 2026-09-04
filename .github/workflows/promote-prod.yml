@@ -10,7 +10,7 @@ on:
 
 permissions:
   contents: read
-
+  id-token: write
 env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY: project-7-cicd-app
